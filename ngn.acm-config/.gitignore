@@ -1,0 +1,10 @@
+.cproject
+.project
+.settings/*
+build/*
+
+# ignore fake lunx include path
+include/linux/**
+
+# ignore test build directory
+test/build/**

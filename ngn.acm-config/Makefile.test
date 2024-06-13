@@ -1,0 +1,26 @@
+# test if ceedling is installed
+
+ifeq ($(shell which ceedling >/dev/null 2>&1 || echo 1),1)
+$(error Please install ceedling: http://www.throwtheswitch.org/ceedling)
+endif
+
+test_all:
+	cd test; ceedling clobber
+	cd test; ceedling test:all
+
+test_gcov:
+	cd test; ceedling clobber
+	cd test; ceedling gcov:all
+	cd test; ceedling utils:gcov
+
+test_clean:
+	cd test; ceedling clobber
+
+# support running a single test file
+test_%:
+	cd test; ceedling test:$@ 
+
+test_gcov_%:
+	cd test; ceedling clobber
+	cd test; ceedling gcov:$(patsubst test_gcov_%,%,$@)
+	cd test; ceedling utils:gcov

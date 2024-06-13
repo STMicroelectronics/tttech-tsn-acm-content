@@ -1,0 +1,11 @@
+Name: libacmconfig
+Version: 1.0.0
+Description: ACM configuration interface library.
+
+prefix=##prefix##
+exec_prefix=##exec_prefix##
+libdir=##libdir##
+includedir=##includedir##
+
+Libs: -L${libdir} -lacmconfig
+Cflags: -I${includedir}/libacmconfig

@@ -1,0 +1,30 @@
+#
+# Das ist das Konfigurationsfile für die acm library
+# It is expected that this file is in /etc/default/config_acm
+#
+
+# nur carriage return
+
+#
+PRAEFIX_MSG_BUFFER_FILENAME		acmbuf_
+
+# Konfiguration der delays
+HW_DELAY_100MBps_CHIP_IN_NS		10
+HW_DELAY_100MBps_CHIP_EG_NS		20
+HW_DELAY_100MBps_PHY_IN_NS		30
+HW_DELAY_100MBps_PHY_EG_NS		40
+HW_DELAY_100MBps_SER_BYPASS_NS		50
+HW_DELAY_100MBps_SER_SWITCH_NS		60
+
+HW_DELAY_1GBps_CHIP_IN_NS		0100
+HW_DELAY_1GBps_CHIP_EG_NS		200
+HW_DELAY_1GBps_PHY_IN_NS		a300
+HW_DELAY_1GBps_PHY_EG_NS		400
+HW_DELAY_1GBps_SER_BYPASS_NS		500
+HW_DELAY_1GBps_SER_SWITCH_NS		600
+
+
+# weitere Konfigurationen
+RECOVERY_TIMEOUT_MS			1500
+LOGLEVEL				2
+TRACELEVEL				0
