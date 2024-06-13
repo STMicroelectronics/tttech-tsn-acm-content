@@ -1,0 +1,23 @@
+# ignore all build directories
+*/build/**
+
+# ignore yocto/devtool created symlinks
+oe-logs
+oe-workdir
+
+*/oe-logs
+*/oe-workdir
+
+# ignore kernel build results
+*/*.o
+*/*.ko
+*/.*
+*/*.mod.c
+*/Module.symvers
+*/modules.order
+
+# ignore eclipse project files
+.project
+.cproject
+.pydevproject
+.settings/**
