@@ -1,0 +1,831 @@
+module acm {
+  namespace "urn:tttech-industrial:yang:acm";
+  prefix "acm";
+  import ieee802-types { prefix ieee; }
+  import ieee802-dot1q-types { prefix dot1q-types; }
+
+  organization
+    "TTTech Industrial Automation AG";
+  contact
+    "Web URL: http://tttech-industrial.com";
+  description 
+    "This module provides a management interface of the ACM module
+    configuration. 
+    
+    This custom YANG module is an individual contribution and
+    does not represent a formally sanctioned YANG module of IEEE. 
+    The purpose is to support the ACM module configuration only";
+  revision 2020-04-09 {
+    description 
+      "Reviewed revision so support a similar experience like other
+      YANG modules. The goal of the revision is also to support 
+      extended features for the ACM module configuration";
+  }
+  
+  typedef hex-string {
+    type string {
+      pattern '(([0-9a-fA-F]{2})*)?';
+    }
+    description 
+      "The hex-string type for additional-filter-mask 
+      and additional-filter-pattern. e.g. 'ff0102bb'";
+  }
+  
+  grouping stream-list {
+    description 
+      "The stream list provides a sorted list (based on stream-key) 
+      of all produced and receveived streams for the ACM module.";
+    list stream {
+      description 
+        "A stream can be defined with its ingress-, egress- and/or 
+        egress-recovery-stream configuration.";
+      key "stream-key";
+      leaf stream-key {
+        type uint16;
+        description
+          "Stream key, 16bit number identifying uniquely the stream within the list.
+          Ingress streams will be processed according to the sequence in this list.
+          This is required for defining the rule-id lookup.
+          Egress streams are not ordered based on this number as they 
+          are depending on the definded timing. The time-end information 
+          in the schedule of the stream will define which egress stream
+          is processed first. ";
+      }
+      container ingress-stream {
+        description 
+          "All ingress operations for a matching stream can be defined here, e.g. read/forward/NOP.";
+        leaf header {
+          type hex-string {
+            length "32";
+          }
+          description
+            "Ethernet header pattern of the ingress frame (16 bytes).";
+        }
+        leaf header-mask {
+          type hex-string {
+            length "32";
+          }
+          description
+            "Mask to define which parts from the ingress frames' ethernet 
+            headers shall be filtered";
+        }
+        leaf additional-filter-size {
+          type uint16 {
+            range "0..112";
+          }
+          description 
+            "Size of the filter (0-112 bytes) used to validate the ingress stream.
+            Filter will be applied at Ethernet II octet offset 16 (after VLAN tag). 
+            A size of 0 indicates that no additional filter is used.";
+        }
+        leaf additional-filter-mask {
+          type hex-string {
+            length "0..224";
+          }
+          description 
+            "Mask used for the filter. If the length of the mask is larger than the 
+            configured size, additional bytes are ignored.";
+        }
+        leaf additional-filter-pattern {
+          type hex-string {
+            length "0..224";
+          }
+          description 
+            "Pattern to match the ingress stream. Bytes over the 
+            configured size are ignored. If the pattern is shorter 
+            than the configured size, the pattern is padded with 0.
+            The value can be e.g. 'FF01020304...'";
+        }
+        leaf has-redundancy-tag {
+          type boolean;
+          description
+            "Defines if the received frame has a 802.1CB redunancy tag. 
+            If set, the individual-recovery (single member stream) or base-recovery 
+            (two streams merged) function will be enabled. ";
+        }
+        leaf seq-recovery-reset-ms {
+          type uint16;
+          description
+            "Reset duration for the individual-recovery and base-recovery function of 802.1CB.
+            The defined duration will reset the recovery function if no frame had been received. 
+            This allows the device to receive the same sequence number again without dropping the frame. 
+            A value of 0 will disable the timeout. ";
+        }
+        leaf operation-list-length {
+          type uint16 {
+            range "0..32";
+          }
+          description 
+            "Defines the length of the stream-operations list. Shall be equal to the no. of entries 
+            in the stream-operations list. 
+            Maximal 32 operations can be defined for an ingress stream.";
+        }
+        list stream-operations {
+          description 
+            "List of operations to perform on the content of the stream.
+            Sequence of list entries is irrelevant";
+          key "operation-key";
+          leaf operation-key {
+            type uint16 {
+              range "0..31";
+            }
+            description 
+            "Operation identifier. The value uniqule identifies the operation.
+            The indentifier is an incrementing number starting with zero.";
+          }
+          leaf operation-name {
+            type enumeration {
+              enum read {
+                description 
+                  "Copy 'length' bytes starting from 'offset' into 
+                  the message buffer 'bufname'";
+              }
+              enum forward {
+                description 
+                  "If forward is set, incoming traffic will be forwarded 
+                  without changes. A definition of EgressStream is not 
+                  allowed when the value is set.";
+              }
+            }
+            description 
+              "Operation to perform. ";
+          }
+          leaf offset {
+            type uint16;
+            description
+              "Offset for the start of the read operation. 
+              Offset 0 is the first byte after start of frame.
+              Offset will be ignored for forward operation.
+              Required for read operation.";
+          }
+          leaf length {
+            type uint16;
+            description 
+              "Number of bytes to read. Length will be ignored for forward operation.
+              Required for read operation.";
+          }
+          leaf buffer-name {
+            type string {
+              length "0..55";
+            }
+            description 
+              "Name of the buffer used for the read operation. 
+              The character device connected to the message buffer 
+              will have the same name.
+              Buffer-name will be ignored for forward operation.
+              Required for read operation.";
+          }
+        }
+      }
+      container event-stream {
+          description 
+            "Event stream.";
+          leaf source-address {
+            type ieee:mac-address;
+            description 
+              "Source MAC address of the event stream.
+               The MAC 00-00-00-00-00-00 will be replaced by the local MAC of the associated port.
+               The MAC FF-FF-FF-FF-FF-FF will forward the MAC of the incomming frame."; 
+          }
+          leaf destination-address {
+            type ieee:mac-address;
+            description 
+              "Destination MAC address of the event stream.
+               The MAC FF-FF-FF-FF-FF-FF will forward the MAC of the incomming frame.";  
+          }
+          leaf vid {
+            type dot1q-types:vlanid;
+            description 
+              "VLAN used for the event stream. If vid and priority are 
+              not defined, the value from the ingress stream will be used.
+              If the provided vid is 4095 the vlan-tag of the incomming frame will be forwarded.";
+          }
+          leaf priority {
+          type dot1q-types:priority-type;
+            description 
+              "Specifies the priority value within the vlan-tag of the
+              event stream. If vid and priority are not defined,
+              the value from the ingress stream will be used. In case of 
+              producing a frame the value is mandatory.";
+          }
+          leaf additional-constant-data-size {
+            type uint16 {
+          range "0..1500";
+            }
+            description
+              "Size of the constant data (0-1500 bytes) inserted into the event 
+              stream. The data can be inserted with the operation 'constant'. 
+              The offset needs to refer to the offset within the 
+              additional-constant-data in bytes.";
+          }
+          leaf additional-constant-data {
+            type hex-string {
+              length "0..3000";
+            }
+            description 
+              "Constant data inserted into the event stream.";
+          }
+          leaf operation-list-length {
+            type uint16 {
+              range "0..251";
+            }
+            description
+              "Defines how many operations shall be in use. 
+              Maximal 251 operations can be defined for an event stream.
+              Within these 251 operations, maximal 8 insert commands may be used.";   
+          }
+          list stream-operations {
+            description 
+              "List of operations to perform on the content of the stream.";
+            key "operation-key";
+            leaf operation-key {
+              type uint16 {
+                range "0..250";
+              }
+              description
+                "Operation identifier. The value uniquely identifies the operation.
+                The key is used to sort the list entries.";
+            }
+            leaf operation-name {
+              type enumeration {
+                enum insert {
+                  description 
+                    "Insert 'length' bytes from the message buffer 'bufname' 
+                    starting from 'offset' into the event stream.
+                    Maximal 8 insert commands can be used for one stream.";
+                }
+                enum forward {
+                  description 
+                    "Forward 'length' bytes from the frame buffer starting 
+                    from 'offset' into the event stream.";
+                }
+                enum pad {
+                  description 
+                    "Pads 'length' bytes with 0x00 starting from 'offset' 
+                    into the event stream.";
+                }
+                enum insert-constant {
+                  description 
+                    "Insert 'lenght' bytes from the additional-constant-data 
+                    starting from 'offset' into the event stream";
+                }
+              }
+              description 
+                "Operation to perform";
+            }
+            leaf offset {
+              type uint16;
+              description 
+                "Offset for the start of the forward/insert-constant operation. 
+                forward: offset 0 is the first byte after start of frame.
+                insert-constant: offset 0 is the first byte of the additional-constant-data.
+                insert/pad: offset will be ignored. Current offset will be used.";
+            }
+            leaf length {
+              type uint16;
+              description 
+                "Number of bytes on which to perform the operation.";
+            }
+            leaf buffer-name {
+              type string {
+                length "0..55";
+              }
+              description 
+                "Name of the buffer used for the insert opration. The character device connected
+                to the message buffer will have the same name.";
+            }
+          }
+        }
+      container egress-stream-recovery {
+        description 
+          "Only valid if ingress- and egress-streams is defined. 
+          The recovery will be generated in case the ingress stream
+          was not received within the defined ingress policing window.";
+        leaf source-address {
+          type ieee:mac-address;
+          description 
+            "Source MAC address of the egress recovery stream"; 
+        }
+        leaf destination-address {
+          type ieee:mac-address;
+          description 
+            "Destination MAC address of the egress stream recovery.";  
+        }
+        leaf vid {
+          type dot1q-types:vlanid;
+            description "Vlan id";
+        }
+        leaf priority {
+        type dot1q-types:priority-type;
+          description 
+            "Priority of the egress stream.";  
+        }
+        leaf additional-constant-data-size {
+          type uint16 {
+        range "0..1500";
+      }
+          description 
+            "Size of the constant (0-1500 bytes) inserted into the egress 
+            stream. The data can be inserted with the operation 'constant'. 
+            The offset needs to refere to the offest within the 
+            additional-constant-data in bytes.";
+        }
+        leaf additional-constant-data {
+          type hex-string {
+      length "0..3000";
+      }
+          description 
+            "constant inserted into the egress stream.";
+        }
+        leaf operation-list-length {
+          type uint16 {
+        range "0..251";
+      }
+          description 
+            "Defines how many operations shall be in use. 
+            Maximal 251 operations can be defined for an egress recovery stream.
+            Within these 251 operations, maximal 8 insert commands may be used.";
+        }
+        list stream-operations {
+          description 
+            "List of operations to perform on the content of the stream.";
+          key "operation-key";
+          leaf operation-key {
+            type uint16 {
+              range "0..250";
+            }
+            description 
+              "Operation identifier. The value uniqule identifies the operation.
+              The key is used to sort the list entries. ";
+          }
+          leaf operation-name {
+            type enumeration {
+              enum insert {
+                description 
+                  "Insert 'length' bytes from the message buffer 'bufname' 
+                  starting from 'offset' into the egress stream.
+                  Maximal 8 insert commands can be used for one stream.";
+              }
+              enum pad {
+                description 
+                  "Paddes 'length' bytes with 0x00 starting from 'offset' into the egress stream.";
+              }
+              enum insert-constant {
+                description 
+                  "Insert 'lenght' bytes from the additional-constant-data 
+                  starting from 'offset' into the egress stream";
+              }
+            }
+            description 
+              "Operation to perform.";
+          }
+          leaf offset {
+            type uint16;
+            description 
+              "Offset for the start of the forward/constant operation. 
+              forward: offset 0 is the first byte after start of frame.
+              constant: offset 0 is the first byte of the additional-constant-data";
+          }
+          leaf length {
+            type uint16;
+            description 
+              "Number of bytes on which to perform the operation.";
+          }
+          leaf buffer-name {
+            type string {
+              length "0..55";
+            }
+            description 
+              "Name of the buffer used for the insert opration. 
+              The character device connected to the message buffer will 
+              have the same name.";
+          }
+        }
+      }
+      container time-triggered-stream {
+        description 
+          "time-triggered stream generated by the device";
+        leaf source-address {
+          type ieee:mac-address;
+          description 
+            "Source MAC address of the egress stream.
+            The MAC 00-00-00-00-00-00 will be replaced by the local MAC of the associated port."; 
+        }
+        leaf destination-address {
+          type ieee:mac-address;
+          description 
+            "Destination MAC address of the egress stream";  
+        }
+        leaf vid {
+          type dot1q-types:vlanid;
+          description 
+            "VLAN used for the egress stream. If vid and priority are 
+            not defined, the value from the ingress stream will be used. 
+            For time-triggered frames the value is mandatory.";
+        }
+        leaf priority {
+      type dot1q-types:priority-type;
+          description 
+            "Specifies the priority value within the vlan-tag of the
+            egress stream. If vid and priority are not defined,
+            the value from the ingress stream will be used. In case of 
+            producing a frame the value is mandatory.";
+        }
+        leaf additional-constant-data-size {
+          type uint16 {
+        range "0..1500";
+          }
+          description
+            "Size of the constant data (0-1500 bytes) inserted into the egress 
+            stream. The data can be inserted with the operation 'constant'. 
+            The offset needs to refer to the offset within the 
+            additional-constant-data in bytes.";
+        }
+        leaf additional-constant-data {
+          type hex-string {
+            length "0..3000";
+          }
+          description 
+            "Constant data inserted into the egress stream.";
+        }
+        leaf operation-list-length {
+          type uint16 {
+            range "0..251";
+          }
+          description
+            "Defines how many operations shall be in use. 
+            Maximal 251 operations can be defined for an egress stream.
+            Within these 251 operations, maximal 8 insert commands may be used.";   
+        }
+        list stream-operations {
+          description 
+            "List of operations to perform on the content of the stream.";
+          key "operation-key";
+          leaf operation-key {
+            type uint16 {
+              range "0..250";
+            }
+            description
+              "Operation identifier. The value uniquely identifies the operation.
+              The key is used to sort the list entries.";
+          }
+          leaf operation-name {
+            type enumeration {
+              enum insert {
+                description 
+                  "Insert 'length' bytes from the message buffer 'bufname' 
+                  starting from 'offset' into the egress stream.
+                  Maximal 8 insert commands can be used for one stream.";
+              }
+              enum pad {
+                description 
+                  "Pads 'length' bytes with 0x00 starting from 'offset' 
+                  into the egress stream.";
+              }
+              enum insert-constant {
+                description 
+                  "Insert 'lenght' bytes from the additional-constant-data 
+                  starting from 'offset' into the egress stream";
+              }
+            }
+            description 
+              "Operation to perform";
+          }
+          leaf offset {
+            type uint16;
+            description 
+              "Offset for the start of the forward/insert-constant operation. 
+              forward: offset 0 is the first byte after start of frame.
+              insert-constant: offset 0 is the first byte of the additional-constant-data.
+              insert/pad: offset will be ignored. Current offset will be used.";
+          }
+          leaf length {
+            type uint16;
+            description 
+              "Number of bytes on which to perform the operation.";
+          }
+          leaf buffer-name {
+            type string {
+              length "0..55";
+            }
+            description 
+              "Name of the buffer used for the insert opration. The character device connected
+              to the message buffer will have the same name.";
+          }
+        }
+      }
+      
+      container stream-schedule {
+        description 
+          "The timing of the stream can be defined here by 
+          setting up a period, ingress-windows, ...";
+        leaf schedule-events-length {
+          type uint16 {
+            range "0..1024";
+          }
+          description 
+            "Defines the number of entries in the schedule-events list."; 
+        }
+        list schedule-events {
+          description 
+            "List of events to perform within the period of the stream";
+          key "schedule-key";                    
+          leaf schedule-key {
+            type uint16 {
+              range "0..1023";
+            }
+            description 
+              "Identifier of the scheduling entry. The value will not be used
+              to sort he list. The value must be unique within the list.
+              The identifier is an incrementing number starting with zero.";
+          }
+
+          leaf period {
+              type uint32;
+              units "ns";
+              description 
+                "Period of the event/window in ns. The period starts with the start of the schedule 
+                 defined in base-time.";
+            }
+          leaf time-start {
+            type uint32;
+            units "ns";
+            description 
+              "Offset compared to the start of the period at which the reception window starts. 
+              The value can be omitted in case a new frame is produced. Timestamp generation for 
+              ingress streams is performed at 19th received byte of a frame. In order for 
+              an ingress stream to be covered by the reception window, the window defined
+              by time-start and time-end must cover that timestamp.";
+          }
+          leaf time-end {
+            type uint32;
+            units "ns";
+            description 
+              "For produced (generated by the device itself) frames: Transmission offset relative 
+              to the start of the period. 
+              For other StreamOps: Frames received in between the time-start and time-end will be  
+              processed and discarded otherwise. If a recovery frame is defined, this is the closing 
+              of the ingress window and transmission of recovery frame.
+              The time-start/time-end (acceptance window) must cover the reception of the 19th byte 
+              of the frame to process the received frame."; 
+          }
+        }
+      }
+    }
+  }
+  
+  grouping status {
+    description 
+      "Status information about the ACM bypass module.";
+    leaf HaltOnErrorOccured {
+      type boolean;
+      description 
+        "This flag informs that an error occurred in the IP and lead to
+        complete HALT of its operation (i. e. ACM is disabled and cannot
+        be re-enabled until IP reset). This only occurs for errors that
+        use M00_IDLE_WAIT_FOR_RESET as the mitigation strategy. All other
+        errors cannot trigger HALT but the IP can mitigate them. The flag
+        is only cleared on reset. ";
+    }
+    leaf IPErrorFlags {
+      type int64;
+      description 
+        "Each time an error occurs the corresponding bit(s) in this vector
+        are asserted. Each bit in this vector represents one error as
+        defined in Section 5.14 in Table 61, where error E00 is placed
+        at the bit position 0 and the error E31 at the bit position 31.
+        The bits are cleared on read or on IP reset.";
+    }
+    leaf PolicingErrorFlags {
+      type uint16;
+      description 
+        "Each time an policing error occurs the corresponding bit(s) in
+        this vector are asserted. Each bit in this vector represents one
+        error as defined in Section 5.14 in Table 62, where error P00
+        is placed at the bit position 0 and the error P03 at the bit position
+        3. The bits are cleared on read or on IP reset.";
+            
+    }
+    leaf RuntFrames {
+      type uint16;
+      description 
+        "This field counts the number of frames that do not have a SOF
+        error, nor MII error, but are shorter than 64 bytes. The counter
+        will not wrap and is cleared on read.";
+    }
+    leaf MIIErrors {
+      type uint16;
+      description 
+        "This field counts the number of frames that started with a valid
+        start sequence (preamble plus SOF delimiter byte) but terminated
+        with the MII error input being asserted. It will be reset on power-on/reset
+        and whenever the host reads the status word containing the counter.
+        The field will not wrap.";
+    }
+    leaf Layer7MismatchCnt {
+      type uint16;
+      description 
+        "Counts the number of frames that failed the Layer 7 check if
+        this check was enabled. This counter is cleared on read and will
+        not wrap.";   
+    }
+    leaf DroppedFramesCounterPrevCycle {
+      type uint16;
+      description 
+        "This field count dropped frames, due to policing errors, during
+        previous (last finished) gate cycle.";
+    }
+    leaf FramesScatteredPrevCycle {
+      type uint16;
+      description 
+        "Number of frames processed by Scatter DMA engine (without dropped
+        frames) in the previous cycle. The field will not wrap.";
+    }
+    leaf TxFramesPrevCycle {
+      type uint16;
+      description 
+        "This field contains the number of MAC-level correct frames (without
+        GMII errors) transmitted on the respective port in the previous
+        gating cycle. The counter will not wrap and is updated at the
+        beginning of the cycle. ";
+    }
+    leaf GMIIErrorPrevCycle {
+      type uint16;
+      description 
+        "Frames with GMII error set in the previous cycle. If a frame
+        transmission had to be stopped (e. g. FCS or MTU error was detected)
+        then ACM IP need to assert GMII error signal to intentionally
+        corrupt the frame. The counter will not wrap.";
+    }
+    leaf AcmDisableOverrunPrevCycle {
+      type uint16;
+      description 
+        "Number of all frames whose transmission was aborted (frame was
+        broken) by the TX MAC when ACM was disabled by the schedule in
+        the previous cycle. The field will not wrap. ";
+    }
+    leaf TxFramesCycleChange {
+      type uint16;
+      description 
+        "This field is incremented when at the end of a cycle rTxFramesPrevCycle
+        and rTxFramesCurrCycle are not equal. This field will not wrap.";
+    }
+    leaf RxFramesPrevCycle {
+      type uint16;
+      description 
+        "Number of ingress frames processed in the previous cycle. Counter
+        increments only for ingress frames without errors. This field will not
+        wrap.";
+    }
+    leaf RxFramesCycleChange {
+      type uint16;
+      description 
+        "This field is incremented when at the end of a cycle
+        RxFramesPrevCycle and RxFramesCurrCycle are not
+        equal. This field will not wrap.";
+    }
+    leaf SofErrors {
+      type uint16;
+      description 
+        "This field counts the number of frames that either started less than
+        16 clocks after the most recent frame, or had a byte other than 0xD5 (SOF)
+        being the first byte or is different than 0x55 (if the frame starts
+        with a preamble), or has the MII error input being asserted prior to
+        or up to the SOF delimiter byte, or is terminated before the first byte
+        of the destination MAC address. This field will not wrap.";
+    }
+  }
+    
+  grouping control {
+    leaf connection-mode {
+      type enumeration {
+        enum parallel {
+          description 
+            "The ACM bypass module is in parallel to the TSN IP.";
+        }
+        enum serial {
+          description 
+            "The ACM bypass module is in serial with the TSN IP.";
+        }
+      }
+      description "The connection mode being used. ";
+    }
+    
+    leaf link-speed {
+      type decimal64 {
+        fraction-digits 3;
+      }
+      units "Gb/s";
+      description 
+        "Used to represent the actual speed of an ACM bypass module in Gigabits per second (Gb/s),
+        accurate to 3 decimal places (i.e., accurate to 1 Mb/s).";
+    } 
+    
+    leaf cycle-time {
+      type uint32;
+      units "ns";
+      description
+        "Overall schedule cycle time in nanoseconds";
+    }
+    
+    container base-time {
+      description
+        "The base time at which scheduling cycles begin, 
+        expressed as an IEEE 1588 precision time protocol (PTP) timescale.";
+      leaf seconds {
+        type uint64;
+        description
+          "This is the integer portion of the timestamp in
+          units of seconds. The upper 16 bits are always zero.";
+      }
+      leaf fractional-seconds {
+        type uint64;
+        description
+          "This is the fractional portion of the timestamp 
+          in units of nanoseconds. This value is always 
+          less than 10^9.";
+      }
+    }
+  }
+
+  container acm {
+    leaf configuration-id {
+      type uint32;
+      description 
+        "Version of the configuration.";
+    }
+    
+    container bypass1 {
+      description 
+        "Configuration for the ACM bypass module 1 (processing frames from CE02 to CE01)";
+      leaf stream-list-length {
+        type uint8;
+        description 
+          "Number of entries in the stream-list.";
+      }
+      uses stream-list;
+      uses control;
+    }
+    container bypass2 {
+      description 
+        "Configuration for the ACM bypass module 2 (processing frames from CE01 to CE02)";
+      leaf stream-list-length {
+        type uint8;
+        description 
+          "Number of entries in the stream-list.";
+      }
+      uses stream-list;
+      uses control;
+    }
+    leaf config-change {
+      type boolean;
+      description 
+        "The config change parameter signals the start of a
+        configuration change when it is set to TRUE.";
+    }
+    leaf schedule-change {
+      type boolean;
+      description 
+        "The schedule change parameter signals the start of a
+        schedule change when it is set to TRUE.
+        In case conifg-change is set to TRUE the paramter will be ignored. 
+        The schedule can only be changed if the configuration-id of the device is 
+        equal to the provided configuration-id of this configuration.";
+    }
+  }
+
+  container acm-state {
+    description 
+      "Status information about the ACM module.";
+    config false;
+    leaf acm-lib-version {
+      type string;
+      description
+        "Version number of the ACM Configuration Library in format <major>.<minor>.<patch>-<hex commit_id>.
+         The version number has an optional extenstion like -dirty in case the changes have not been
+         commited. It can also contain a number before the commit-id field showing the number of commits between
+         the last officially versioned release. 
+         Maximal length of the string is 30 characters.
+         (Example: 1.0.0-1234abcd or 1.2.0-42-abcd1234 or 1.3.1-38-5678efgh-dirty)";
+    }
+    leaf acm-ip-version {
+      type string;
+      reference "ICD 6.2 Version Registers";
+      description 
+        "Version number of the ACM IP. The version represents the device_id, version_id and 
+         revision_id of the current IP in the format <device_id>-<major>.<minor>.<patch>-<hex revision-id>.
+         Maximal length of the string is 24 characters.
+         (Example: 0x1301-1.0.0-1234abcd)";
+    }
+    container bypass1 {
+      description 
+        "Status for the ACM bypass module 1 (processing frames from CE02 to CE01)";
+      uses status;
+    }
+    container bypass2 {
+      description 
+        "Status for the ACM bypass module 2 (processing frames from CE01 to CE02)";
+      uses status;
+    }
+  }
+}
