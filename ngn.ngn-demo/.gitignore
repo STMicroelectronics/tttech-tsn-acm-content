@@ -1,0 +1,11 @@
+# ignore eclipse project files
+.cproject
+.project
+.settings
+
+# ignore build directories
+*/build/**
+
+# ignore yocto/devtool created symlinks
+oe-logs
+oe-workdir
