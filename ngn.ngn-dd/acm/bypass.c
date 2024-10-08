@@ -33,7 +33,6 @@
 #include <linux/netdevice.h>
 #include <asm/unaligned.h>
 #include <linux/mutex.h>
-#include <linux/hrtimer.h>
 
 #include "acm-module.h"
 #include "bypass.h"
@@ -89,7 +88,7 @@ struct bypass {
 	struct phy_device	*phy_dev;	/**< associated phy device */
 	struct acmdrv_diagnostics diag;		/**< module diagnostics data */
 	struct mutex		diag_lock;	/**< diag data access lock */
-	struct hrtimer		diag_timer;	/**< diag data polling timer */
+	struct delayed_work	diag_work;	/**< diag data polling work */
 	unsigned int		diag_poll_time;	/**< diag data poll time (ms) */
 	bool			active;	/**< denotes bypass module as active */
 
@@ -594,10 +593,8 @@ unlock:
 
 	if (bypass->diag_poll_time > 0)
 		/* (re)start timer */
-		hrtimer_start_range_ns(&bypass->diag_timer,
-			ns_to_ktime(
-				(u64)bypass->diag_poll_time * NSEC_PER_MSEC),
-			50000, HRTIMER_MODE_REL);
+		mod_delayed_work(bypass->acm->wq, &bypass->diag_work,
+				 msecs_to_jiffies(bypass->diag_poll_time));
 
 	return ret;
 }
@@ -694,11 +691,10 @@ void bypass_set_diag_poll_time(unsigned int poll, struct bypass *bypass)
 
 	if (poll > 0)
 		/* (re)start timer */
-		hrtimer_start_range_ns(&bypass->diag_timer,
-			ns_to_ktime((u64)poll * NSEC_PER_MSEC), 50000,
-			HRTIMER_MODE_REL);
+		mod_delayed_work(bypass->acm->wq, &bypass->diag_work,
+				 msecs_to_jiffies(bypass->diag_poll_time));
 	else
-		hrtimer_cancel(&bypass->diag_timer);
+		cancel_delayed_work_sync(&bypass->diag_work);
 }
 
 /**
@@ -778,23 +774,21 @@ static int bypass_netdev_event(struct notifier_block *nb,
 /**
  * @brief timer function for diagnostic data poll
  */
-static enum hrtimer_restart bypass_diag_poll(struct hrtimer *t)
+static void bypass_diag_poll(struct work_struct *work)
 {
-	struct bypass *bypass = container_of(t, struct bypass, diag_timer);
+	struct bypass *bypass = container_of(work, struct bypass,
+					     diag_work.work);
 	int ret;
 
 	ret = mutex_lock_interruptible(&bypass->diag_lock);
 	if (ret)
-		return ret;
+		return;
 	bypass_diag_update(bypass);
 	mutex_unlock(&bypass->diag_lock);
-	if (bypass->diag_poll_time)
-		hrtimer_forward_now(t,
-			ns_to_ktime((u64)bypass->diag_poll_time *
-				NSEC_PER_MSEC));
-
-	return bypass->diag_poll_time == 0 ?
-		HRTIMER_NORESTART : HRTIMER_RESTART;
+	if (bypass->diag_poll_time > 0)
+		queue_delayed_work(bypass->acm->wq,
+				   &bypass->diag_work,
+				   msecs_to_jiffies(bypass->diag_poll_time));
 }
 
 int __must_check bypass_init(struct acm *acm)
@@ -849,9 +843,7 @@ int __must_check bypass_init(struct acm *acm)
 		if (ret)
 			return ret;
 
-		hrtimer_init(&bypass[i].diag_timer, CLOCK_MONOTONIC,
-			HRTIMER_MODE_REL);
-		bypass[i].diag_timer.function = bypass_diag_poll;
+		INIT_DELAYED_WORK(&bypass[i].diag_work, bypass_diag_poll);
 
 		/* load initial diagnostic poll timeout */
 		bypass_set_diag_poll_time(diag_poll, &bypass[i]);
@@ -877,7 +869,7 @@ void bypass_exit(struct acm *acm)
 	for (i = 0; i < ACMDRV_BYPASS_MODULES_COUNT; ++i) {
 		struct bypass *bypass = acm->bypass[i];
 
-		hrtimer_cancel(&bypass->diag_timer);
+		cancel_delayed_work_sync(&bypass->diag_work);
 		if (bypass->phy_dev)
 			put_device(&bypass->phy_dev->mdio.dev);
 		bypass->phy_dev = NULL;

@@ -19,6 +19,7 @@
 
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/workqueue.h>
 #include <asm/bitsperlong.h>
 
 #include "api/acmdrv.h"
@@ -43,6 +44,9 @@ enum acm_ip_if_variant {
  *
  * @var acm::pdev
  * @brief the associated platform device
+ *
+ * @var acm::wq
+ * @brief common workqueue for bypass modules and redundancy recovery
  *
  * @var acm::bypass
  * @brief array of bypass module handlers
@@ -82,6 +86,7 @@ struct acm {
 	struct device		dev;
 	struct platform_device	*pdev;
 
+	struct workqueue_struct	*wq;
 	struct bypass		*bypass[ACMDRV_BYPASS_MODULES_COUNT];
 	struct scheduler	*scheduler;
 	struct redundancy	*redundancy;

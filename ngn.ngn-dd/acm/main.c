@@ -178,12 +178,16 @@ static int acm_probe(struct platform_device *pdev)
 		goto out;
 	}
 
+	acm->wq = alloc_workqueue(ACMDRV_NAME, WQ_HIGHPRI | WQ_MEM_RECLAIM, 0);
+	if (!acm->wq)
+		goto out;
+
 	/* Common Register Block must be initialize first, so we can use it */
 	dev_info(dev, "commreg_init");
         udelay(500);
 	ret = commreg_init(acm);
 	if (ret)
-		goto out;
+		goto out_wq;
 	dev_info(dev, "reset_init");
         udelay(500);
 	ret = reset_init(acm, np);
@@ -306,6 +310,8 @@ out_reset:
 	reset_exit(acm);
 out_commreg:
 	commreg_exit(acm);
+out_wq:
+	destroy_workqueue(acm->wq);
 out:
 	return ret;
 }
@@ -328,6 +334,7 @@ static int acm_remove(struct platform_device *pdev)
 	bypass_exit(acm);
 	reset_exit(acm);
 	commreg_exit(acm);
+	destroy_workqueue(acm->wq);
 
 	return 0;
 }

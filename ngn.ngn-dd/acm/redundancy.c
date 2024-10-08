@@ -24,7 +24,6 @@
 #include <linux/device.h>
 #include <linux/of.h>
 #include <linux/uaccess.h>
-#include <linux/hrtimer.h>
 #include <linux/time.h>
 #include <asm/div64.h>
 
@@ -104,8 +103,8 @@ struct base_recovery_data {
  * @var recovery::interval
  * @brief nanoseconds interval derived from TicksPerSecond
  *
- * @var recovery::timer
- * @brief TicksPerSecond timer
+ * @var recovery::work
+ * @brief delayed work for TicksPerSecond timer
  *
  * @var recovery::individual
  * @brief individual recovery data
@@ -118,7 +117,7 @@ struct base_recovery_data {
  */
 struct recovery {
 	u64 interval;
-	struct hrtimer timer;
+	struct delayed_work work;
 
 	struct recovery_data individual[ACMDRV_BYPASS_NR_RULES]
 					[ACMDRV_BYPASS_MODULES_COUNT];
@@ -557,7 +556,7 @@ static void set_recovery_tick(struct recovery *recovery,
 	/* stop timer */
 	if (ticks_per_second == 0) {
 		recovery->interval = 0;
-		hrtimer_cancel(&recovery->timer);
+		cancel_delayed_work_sync(&recovery->work);
 		return;
 	}
 
@@ -567,9 +566,8 @@ static void set_recovery_tick(struct recovery *recovery,
 	dev_dbg(acm_dev(acm), "Setting recovery timer interval to %lld ns\n",
 		recovery->interval);
 
-	hrtimer_start_range_ns(&recovery->timer,
-		ns_to_ktime(recovery->interval), 50000,
-		HRTIMER_MODE_REL);
+	mod_delayed_work(acm->wq, &recovery->work,
+			 nsecs_to_jiffies(recovery->interval));
 
 }
 
@@ -641,7 +639,7 @@ static void recovery_process(struct recovery *recovery)
 	unsigned int idx;
 
 	struct redundancy *redund = container_of(recovery, struct redundancy,
-		recovery);
+						 recovery);
 
 	for (module = 0; module < ACMDRV_BYPASS_MODULES_COUNT; ++module)
 		for (idx = 0; idx < ACMDRV_BYPASS_NR_RULES; ++idx)
@@ -652,27 +650,26 @@ static void recovery_process(struct recovery *recovery)
 }
 
 /**
- * @brief recovery timer function
+ * @brief recovery work function for recovery timer
  *
- * @param t hrtimer associated with recovery
- * @return HRTIMER_RESTART if recovery tick <> 0, else HRTIMER_NORESTART
+ * @param work work struct associated with recovery
  */
-static enum hrtimer_restart recovery_timer(struct hrtimer *t)
+static void recovery_work(struct work_struct *work)
 {
-	enum hrtimer_restart ret = HRTIMER_NORESTART;
-	struct recovery *recovery = container_of(t, struct recovery, timer);
+	struct recovery *recovery = container_of(work, struct recovery,
+						 work.work);
+	struct acm *acm = container_of(recovery, struct redundancy,
+				       recovery)->acm;
 
 	mutex_lock(&recovery->lock);
 
 	if (recovery->interval > 0) {
 		recovery_process(recovery);
-		hrtimer_forward_now(t, ns_to_ktime(recovery->interval));
-
-		ret = HRTIMER_RESTART;
+		queue_delayed_work(acm->wq, &recovery->work,
+				   nsecs_to_jiffies(recovery->interval));
 	}
 
 	mutex_unlock(&recovery->lock);
-	return ret;
 }
 
 /**
@@ -697,8 +694,7 @@ static void recovery_init(struct redundancy *redund)
 	mutex_unlock(&recovery->lock);
 
 	/* start recovery tick */
-	hrtimer_init(&recovery->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	recovery->timer.function = recovery_timer;
+	INIT_DELAYED_WORK(&recovery->work, recovery_work);
 	set_recovery_tick(recovery, recovery_ticks_per_sec);
 }
 
