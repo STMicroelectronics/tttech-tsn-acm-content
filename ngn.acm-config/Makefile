@@ -1,8 +1,7 @@
 # name of the final target
 MODULE = libacmconfig.so
 # strip off git extra info
-#LIBSOVERSION = $(firstword $(subst -,$(space),$(GIT_VERSION)))
-LIBSOVERSION = $(EXTERNAL_LIBRARY_VERSION)
+LIBSOVERSION = $(firstword $(subst -,$(space),$(GIT_VERSION)))
 PKGCONFIG=libacmconfig.pc
 
 # default flags

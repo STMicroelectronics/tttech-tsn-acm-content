@@ -4,7 +4,7 @@
 build/*
 
 # ignore fake lunx include path
-include/linux/**
+#include/linux/**
 
 # ignore test build directory
 test/build/**
