@@ -26,10 +26,9 @@
  * @{
  */
 
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
-#include <linux/of_gpio.h>
 #include <linux/delay.h>
+#include <linux/err.h>
 
 #include "acm-module.h"
 #include "commreg.h"
@@ -45,22 +44,13 @@
 #define ACM_RST_MAX_RETRY	16
 
 /**
- * @brief helper structure to maintain reset gpios
- */
-struct reset_gpio {
-	int		gpio;	/**< GPIO number */
-	unsigned long	flags;	/**< GPIO flags */
-	const char	*label;	/**< Label */
-};
-
-/**
  * @brief structure to maintain reset control instance
  */
 struct reset {
-	struct acm *acm;		/**< associated ACM instance */
-	struct reset_gpio gpios[2];	/**< reset GPIO data */
+	struct acm *acm;			/**< associated ACM instance */
+	struct gpio_desc *gpios[2];		/**< reset GPIO descriptors */
 
-	int (*init)(struct reset *rst, struct device_node *np); /**< init func*/
+	int (*init)(struct reset *rst);		/**< init func*/
 	int (*trigger)(struct reset *trig);	/**< trigger reset func */
 };
 
@@ -71,44 +61,42 @@ static int reset_gpio(struct reset *reset)
 {
 	int ret = -ETIMEDOUT;
 
-	int rstout = reset->gpios[0].gpio;
-	int rstin = reset->gpios[1].gpio;
-	struct gpio_desc *rstout_desc;
+	struct gpio_desc *rstout = reset->gpios[0];
+	struct gpio_desc *rstin = reset->gpios[1];
 
-
-	if (!gpio_is_valid(rstout))
+	if (IS_ERR(rstout)) {
+		dev_warn(&reset->acm->pdev->dev, "No reset-out GPIO configured, skip reset\n");
 		return 0;
+	}
 
-	rstout_desc = gpio_to_desc(rstout);
-	gpiod_set_value(rstout_desc, 1);
+	gpiod_set_value(rstout, 1);
 
-	if (gpio_is_valid(rstin)) {
-		struct gpio_desc *rstin_desc = gpio_to_desc(rstin);
+	if (!IS_ERR(rstin)) {
 		int retry;
 
-		for (retry = 0; !gpiod_get_value(rstin_desc); ++retry) {
+		for (retry = 0; !gpiod_get_value(rstin); ++retry) {
 			if (retry >= ACM_RST_MAX_RETRY)
 				goto reset_deact;
 			udelay(1);
 		}
 
-		gpiod_set_value(rstout_desc, 0);
+		gpiod_set_value(rstout, 0);
 
-		for (retry = 0; gpiod_get_value(rstin_desc); ++retry) {
+		for (retry = 0; gpiod_get_value(rstin); ++retry) {
 			if (retry >= ACM_RST_MAX_RETRY)
 				goto out;
 			udelay(1);
 		}
 		ret = 0;
 	} else {
-		dev_warn_once(&reset->acm->pdev->dev, "No reset-in configured, using reset-out pulse only\n");
+		dev_warn(&reset->acm->pdev->dev, "No reset-in GPIO configured, using reset-out pulse only\n");
 		/* no reset in configured, use simple delay */
 		udelay(5);
 		ret = 0;
 	}
 
 reset_deact:
-	gpiod_set_value(rstout_desc, 0);
+	gpiod_set_value(rstout, 0);
 out:
 	return ret;
 }
@@ -116,48 +104,26 @@ out:
 /**
  * @brief initialize GPIO based reset control
  */
-static int reset_gpio_init(struct reset *reset, struct device_node *np)
+static int reset_gpio_init(struct reset *reset)
 {
-	int i, ret;
+	int i;
 	struct device *dev = &reset->acm->pdev->dev;
 
-	reset->gpios[0].flags = GPIOF_OUT_INIT_LOW;
-	reset->gpios[0].label = "acm-rst-out";
-	reset->gpios[1].flags = GPIOF_DIR_IN;
-	reset->gpios[1].label = "acm-rst-in";
-
 	for (i = 0; i < 2; ++i) {
-		enum of_gpio_flags flags;
 
-		reset->gpios[i].gpio = -1;
-		reset->gpios[i].gpio = of_get_named_gpio_flags(np,
-			"reset-gpios", i, &flags);
-
-		if (gpio_is_valid(reset->gpios[i].gpio)) {
-
-			if (flags == OF_GPIO_ACTIVE_LOW)
-				reset->gpios[i].flags |= GPIOF_ACTIVE_LOW;
-			else
-				reset->gpios[i].flags &= ~GPIOF_ACTIVE_LOW;
-
-			ret = devm_gpio_request_one(dev, reset->gpios[i].gpio,
-				reset->gpios[i].flags, reset->gpios[i].label);
-
-			if (ret) {
-				dev_err(dev, "failed to get %s: %d\n",
-						reset->gpios[i].label, ret);
-				return ret;
-			}
-		} else {
-			dev_warn(dev, "no %s configured\n",
-				 reset->gpios[i].label);
+		enum gpiod_flags flags = GPIOD_OUT_LOW;
+		if (i == 1) {
+			flags = GPIOD_IN;
+		}
+		reset->gpios[i] = gpiod_get_index(dev, "reset", i, flags);
+		if (IS_ERR(reset->gpios[i])) {
+			dev_warn(dev, "No ACM GPIO %i configured: %ld\n",
+				i, PTR_ERR(reset->gpios[i]));
 		}
 	}
 
-
 	/* de-assert reset-out */
-	if (gpio_is_valid(reset->gpios[0].gpio))
-		gpiod_set_value(gpio_to_desc(reset->gpios[0].gpio), 0);
+	gpiod_set_value(reset->gpios[0], 0);
 
 	return 0;
 }
@@ -176,7 +142,7 @@ static int reset_register(struct reset *reset)
 /**
  * @brief initialize register based reset control
  */
-static int reset_register_init(struct reset *reset, struct device_node *np)
+static int reset_register_init(struct reset *reset)
 {
 	return reset_register(reset);
 }
@@ -184,7 +150,7 @@ static int reset_register_init(struct reset *reset, struct device_node *np)
 /**
  * @brief initialize reset control
  */
-int __must_check reset_init(struct acm *acm, struct device_node *np)
+int __must_check reset_init(struct acm *acm)
 {
 	struct reset *reset;
 	struct device *dev = &acm->pdev->dev;
@@ -204,7 +170,7 @@ int __must_check reset_init(struct acm *acm, struct device_node *np)
 		reset->init = reset_register_init;
 		reset->trigger = reset_register;
 	}
-	return reset->init(reset, np);
+	return reset->init(reset);
 }
 
 /**

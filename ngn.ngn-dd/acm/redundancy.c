@@ -568,7 +568,6 @@ static void set_recovery_tick(struct recovery *recovery,
 
 	mod_delayed_work(acm->wq, &recovery->work,
 			 nsecs_to_jiffies(recovery->interval));
-
 }
 
 /**

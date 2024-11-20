@@ -78,6 +78,7 @@
 #include <linux/of_platform.h>
 #include <linux/fs.h>
 #include <linux/stringify.h>
+#include <linux/version.h>
 
 #include "acm-module.h"
 #include "sysfs.h"
@@ -190,7 +191,7 @@ static int acm_probe(struct platform_device *pdev)
 		goto out_wq;
 	dev_info(dev, "reset_init");
         udelay(500);
-	ret = reset_init(acm, np);
+	ret = reset_init(acm);
 	if (ret)
 		goto out_commreg;
 	dev_info(dev, "bypass_init");
@@ -358,7 +359,11 @@ static int __init acm_module_init(void)
 {
 	int ret;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 	acm_class = class_create(THIS_MODULE, ACMDRV_NAME);
+#else
+	acm_class = class_create(ACMDRV_NAME);
+#endif
 	if (IS_ERR_OR_NULL(acm_class)) {
 		ret = PTR_ERR(acm_class);
 		pr_err("class_create() failed: %d\n", ret);

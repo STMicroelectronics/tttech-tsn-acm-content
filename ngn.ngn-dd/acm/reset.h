@@ -26,7 +26,7 @@ struct reset;
  * @{
  */
 
-int __must_check reset_init(struct acm *acm, struct device_node *np);
+int __must_check reset_init(struct acm *acm);
 void reset_exit(struct acm *acm);
 int reset_trigger(struct reset *reset);
 
